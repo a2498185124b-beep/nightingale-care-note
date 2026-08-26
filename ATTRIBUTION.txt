@@ -1,0 +1,26 @@
+Nightingale Care Note — External Components and Attribution
+Generated: 2026-08-26
+
+RUNTIME / BUILD DEPENDENCIES
+
+Next.js 16.2.6 — MIT — https://github.com/vercel/next.js
+React 19.2.6 and React DOM 19.2.6 — MIT — https://github.com/facebook/react
+Drizzle ORM 0.45.2 — Apache-2.0 — https://github.com/drizzle-team/drizzle-orm
+Tailwind CSS 4.2.1 — MIT — https://github.com/tailwindlabs/tailwindcss
+Vinext 0.0.50 — MIT — https://github.com/cloudflare/vinext
+Vite 8.0.13 — MIT — https://github.com/vitejs/vite
+Cloudflare Vite Plugin 1.37.1 — MIT — https://github.com/cloudflare/workers-sdk
+Wrangler 4.92.0 — MIT OR Apache-2.0 — https://github.com/cloudflare/workers-sdk
+
+MODELS / GENERATED ASSETS
+
+No LLM is called by the running prototype. lib/llm-gateway.ts is a redaction-enforced boundary stub.
+public/og.png was generated specifically for this project with ChatGPT's built-in image-generation capability. The underlying model version was not exposed to the project and is therefore not guessed here. Usage is governed by the applicable OpenAI terms, not represented as an open-source license.
+
+DATA
+
+All patient, clinic, staff, clinician, dates, notes, identifiers and sessions are original synthetic fixtures written for this prototype. No external clinical dataset and no real patient record is included.
+
+CODE REUSE
+
+No third-party repository source files were copied into this project. Public repositories and official documentation were used as design references only; implementation code in app/, db/, lib/, scripts/ and tests_py/ is original for this build.
