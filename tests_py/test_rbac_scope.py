@@ -7,7 +7,8 @@ class RbacScopeTests(unittest.TestCase):
         self.model = CareModel()
         self.model.add_note(Note("staff", "clinic-a", "staff", "staff-only"))
         self.model.add_note(Note("clinical", "clinic-a", "clinician", "raw internal AI review"))
-        self.model.add_note(Note("patient-summary", "clinic-a", "clinician", "patient instructions", patient_visible=True))
+        self.model.add_note(Note("patient-summary", "clinic-a", "clinician", "patient instructions", patient_visible=True, patient_release_state="clinician_approved"))
+        self.model.add_note(Note("patient-draft", "clinic-a", "system", "unapproved AI instructions", patient_visible=True, patient_release_state="draft"))
         self.staff = Actor("s1", "staff", "clinic-a")
         self.clinician = Actor("c1", "clinician", "clinic-a")
         self.patient = Actor("p1", "patient", "clinic-a")
@@ -21,6 +22,8 @@ class RbacScopeTests(unittest.TestCase):
     def test_patient_cannot_access_internal_or_raw_ai_notes(self):
         with self.assertRaises(PermissionDenied):
             self.model.read(self.patient, "clinical")
+        with self.assertRaises(PermissionDenied):
+            self.model.read(self.patient, "patient-draft")
         self.assertEqual(self.model.read(self.patient, "patient-summary"), "patient instructions")
 
     def test_cross_clinic_is_denied(self):
@@ -31,4 +34,3 @@ class RbacScopeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type {
   CareEntry,
+  ClinicalConflict,
   Comment,
   DemoUser,
   Highlight,
@@ -15,6 +16,7 @@ type WorkspaceBundle = {
   currentUser: DemoUser;
   users: DemoUser[];
   highlights: Highlight[];
+  conflicts: ClinicalConflict[];
   entries: CareEntry[];
   comments: Comment[];
   openTasks: number;
@@ -57,7 +59,7 @@ function formatDate(value: string) {
 }
 
 function visibleToRole(entry: CareEntry, role: Role) {
-  if (role === "patient") return entry.patientVisible;
+  if (role === "patient") return entry.patientVisible && ["clinician_approved", "rule_verified"].includes(entry.patientReleaseState ?? "not_applicable");
   if (role === "staff") return entry.authorRole !== "clinician";
   return true;
 }
@@ -73,6 +75,7 @@ export default function CareWorkspace({ bundle }: { bundle: WorkspaceBundle }) {
   const [highlights, setHighlights] = useState<Highlight[]>(bundle.highlights);
   const [entries, setEntries] = useState<CareEntry[]>(bundle.entries);
   const [comments, setComments] = useState<Comment[]>(bundle.comments);
+  const [conflicts, setConflicts] = useState<ClinicalConflict[]>(bundle.conflicts);
   const [filter, setFilter] = useState("All activity");
   const [query, setQuery] = useState("");
   const [commentDraft, setCommentDraft] = useState<Record<string, string>>({});
@@ -81,6 +84,7 @@ export default function CareWorkspace({ bundle }: { bundle: WorkspaceBundle }) {
   const [editingEntry, setEditingEntry] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
   const [toast, setToast] = useState("Ready · all information is synthetic");
+  const [selectedSource, setSelectedSource] = useState<{ entryId: string; quote: string } | null>(null);
 
   useEffect(() => {
     fetch("/api/care", { headers: { accept: "application/json" } })
@@ -89,6 +93,7 @@ export default function CareWorkspace({ bundle }: { bundle: WorkspaceBundle }) {
         if (payload.entries) setEntries(payload.entries);
         if (payload.highlights) setHighlights(payload.highlights);
         if (payload.comments) setComments(payload.comments);
+        if (payload.conflicts) setConflicts(payload.conflicts);
       })
       .catch(() => undefined);
   }, []);
@@ -118,6 +123,7 @@ export default function CareWorkspace({ bundle }: { bundle: WorkspaceBundle }) {
         .slice(0, 4),
     [entries, highlights, role],
   );
+  const openConflicts = conflicts.filter((item) => item.status === "open");
 
   async function switchRole(userId: string) {
     const nextUser = bundle.users.find((candidate) => candidate.id === userId);
@@ -138,7 +144,9 @@ export default function CareWorkspace({ bundle }: { bundle: WorkspaceBundle }) {
 
   async function reviewHighlight(id: string, status: "accepted" | "rejected") {
     setHighlights((items) => items.map((item) => (item.id === id ? { ...item, status } : item)));
-    setToast(status === "accepted" ? "Suggestion accepted and audited" : "Suggestion rejected; feedback retained for ranking");
+    setToast(status === "accepted"
+      ? "Accepted · bounded positive feedback recorded; safety floors remain locked"
+      : "Rejected · recorded for evaluation, not auto-demoted without a reason");
     try {
       await fetch(`/api/highlights/${id}/review`, {
         method: "POST",
@@ -150,12 +158,37 @@ export default function CareWorkspace({ bundle }: { bundle: WorkspaceBundle }) {
     }
   }
 
-  function jumpToSource(entryId: string) {
+  function jumpToSource(entryId: string, quote = "") {
+    setSelectedSource({ entryId, quote });
     document.getElementById(entryId)?.scrollIntoView({ behavior: "smooth", block: "center" });
     const node = document.getElementById(entryId);
     node?.classList.add("source-pulse");
     window.setTimeout(() => node?.classList.remove("source-pulse"), 1800);
     setToast("Showing the exact source entry and version");
+  }
+
+  async function resolveClinicalConflict(conflict: ClinicalConflict) {
+    const resolution = "Clinician reviewed both notes; current clinician-authored dose remains authoritative pending medication reconciliation.";
+    try {
+      const response = await fetch(`/api/conflicts/${conflict.id}/resolve`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ resolution }),
+      });
+      if (!response.ok) throw new Error("Resolution failed");
+      setConflicts((items) => items.map((item) => item.id === conflict.id ? { ...item, status: "resolved", resolution } : item));
+      setToast("Conflict resolved with both sources preserved · patient draft still needs explicit approval");
+    } catch {
+      setToast("Conflict resolution failed safely · no source was overwritten");
+    }
+  }
+
+  function anchoredContent(entry: CareEntry) {
+    const quote = selectedSource?.entryId === entry.id ? selectedSource.quote : "";
+    if (!quote) return entry.content;
+    const start = entry.content.indexOf(quote);
+    if (start < 0) return entry.content;
+    return <>{entry.content.slice(0, start)}<mark>{quote}</mark>{entry.content.slice(start + quote.length)}</>;
   }
 
   async function addComment(entryId: string) {
@@ -316,31 +349,58 @@ export default function CareWorkspace({ bundle }: { bundle: WorkspaceBundle }) {
             <div>
               <span className="eyebrow">Consult glance · updated 2 min ago</span>
               <h2 id="glance-title">What matters now</h2>
-              <p>Four prioritized items. Each one resolves to its exact source.</p>
+              <p>Four prioritized items. Evidence, scoring and failure behavior are inspectable.</p>
             </div>
             <div className="glance-actions">
               <span><b>2</b> open actions</span>
               <button onClick={() => setToast("Ambient capture is bonus-scoped: redact locally before any model call")}>Start ambient capture</button>
             </div>
           </div>
+          <div className="evaluation-strip" aria-label="Safety evaluation status">
+            <span><b>4/4</b> exact source spans</span>
+            <span><b>1</b> deterministic risk floor</span>
+            <span><b>1</b> patient draft abstained</span>
+            <span><b>100%</b> synthetic redaction recall</span>
+          </div>
+          {openConflicts.map((conflict) => (
+            <article className="conflict-banner" key={conflict.id}>
+              <div className="conflict-icon" aria-hidden="true">!</div>
+              <div>
+                <span className="eyebrow">Unresolved {conflict.domain} conflict · {conflict.severity}</span>
+                <h3>{conflict.summary}</h3>
+                <p>{conflict.detectionRule}. {conflict.failureAction}.</p>
+                <div className="conflict-sources">
+                  <button onClick={() => jumpToSource(conflict.left.entryId, conflict.left.quote)}>{conflict.left.role} · v{conflict.left.version} source</button>
+                  <button onClick={() => jumpToSource(conflict.right.entryId, conflict.right.quote)}>{conflict.right.role} · v{conflict.right.version} source</button>
+                  {role === "clinician" && <button className="resolve-conflict" onClick={() => resolveClinicalConflict(conflict)}>Resolve after review</button>}
+                </div>
+              </div>
+            </article>
+          ))}
           <div className="highlight-grid">
             {visibleHighlights.map((item) => (
               <article className={`highlight-card ${item.severity}`} key={item.id}>
                 <div className="highlight-topline">
                   <span className="severity-label">{item.severity}</span>
-                  <span className={`review-state ${item.status}`}>{item.status === "suggested" ? "AI suggestion" : "Confirmed"}</span>
+                  <span className="evidence-label">Evidence {item.evidence.verifiedClaims}/{item.evidence.totalClaims}</span>
                 </div>
                 <h3>{item.title}</h3>
                 <p>{item.detail}</p>
-                <div className="reason"><span>Why</span>{item.riskReason}</div>
+                <div className="reason"><span>Risk basis</span>{item.riskReason}{item.riskFloorRule && <b className="floor-chip">Safety floor</b>}</div>
+                <details className="score-details">
+                  <summary>Importance {item.score} · inspect calculation</summary>
+                  <p>risk {item.scoreBreakdown.risk} + recency {item.scoreBreakdown.recency} + action {item.scoreBreakdown.action} + entity {item.scoreBreakdown.entity} + feedback {item.scoreBreakdown.feedback} + floor {item.scoreBreakdown.safetyFloor}</p>
+                  {item.riskFloorRule && <p>{item.riskFloorRule}</p>}
+                </details>
+                <p className="failure-action"><b>If wrong:</b> {item.evidence.failureAction}</p>
                 <div className="highlight-footer">
-                  <button className="source-link" onClick={() => jumpToSource(item.sourceEntryId)}>View source · v{item.sourceVersion} ↘</button>
+                  <button className="source-link" onClick={() => jumpToSource(item.sourceEntryId, item.sourceQuote)}>View exact span · v{item.sourceVersion} ↘</button>
                   {item.status === "suggested" && role === "clinician" ? (
                     <div className="review-buttons">
                       <button aria-label={`Reject ${item.title}`} onClick={() => reviewHighlight(item.id, "rejected")}>×</button>
                       <button aria-label={`Accept ${item.title}`} onClick={() => reviewHighlight(item.id, "accepted")}>✓</button>
                     </div>
-                  ) : <span className="score">{item.score}</span>}
+                  ) : <span className={`review-state ${item.status}`}>{item.status === "suggested" ? "Review" : "Confirmed"}</span>}
                 </div>
               </article>
             ))}
@@ -364,7 +424,14 @@ export default function CareWorkspace({ bundle }: { bundle: WorkspaceBundle }) {
                   <div className="entry-card">
                     <div className="entry-header">
                       <div>
-                        <div className="entry-author"><strong>{entry.authorName}</strong><span className={`role-tag ${entry.authorRole}`}>{entry.authorRole}</span>{entry.reviewState === "pending_review" && <span className="pending-tag">Not clinician confirmed</span>}</div>
+                        <div className="entry-author">
+                          <strong>{entry.authorName}</strong>
+                          <span className={`role-tag ${entry.authorRole}`}>{entry.authorRole}</span>
+                          {entry.reviewState === "pending_review" && <span className="pending-tag">Not clinician confirmed</span>}
+                          {entry.evidenceMode && <span className={`evidence-mode ${entry.evidenceMode}`}>{entry.evidenceMode}</span>}
+                          {entry.patientReleaseState === "clinician_approved" && <span className="release-tag approved">Patient release approved</span>}
+                          {entry.patientReleaseState === "draft" && <span className="release-tag blocked">Patient release blocked</span>}
+                        </div>
                         <time>{formatDate(entry.createdAt)} · {entry.type.replaceAll("_", " ")}</time>
                       </div>
                       <div className="entry-actions">
@@ -375,7 +442,17 @@ export default function CareWorkspace({ bundle }: { bundle: WorkspaceBundle }) {
                     <h3>{entry.title}</h3>
                     {editingEntry === entry.id ? (
                       <div className="editor-box"><textarea value={editDraft} onChange={(event) => setEditDraft(event.target.value)} /><div><button onClick={() => setEditingEntry(null)}>Cancel</button><button className="primary" onClick={() => saveEdit(entry)}>Save new version</button></div></div>
-                    ) : <p className="entry-content">{entry.content}</p>}
+                    ) : <p className="entry-content">{anchoredContent(entry)}</p>}
+                    {entry.evidenceCoverageBasisPoints !== undefined && (
+                      <div className="entry-evidence">
+                        <span>Evidence coverage {(entry.evidenceCoverageBasisPoints / 100).toFixed(0)}%</span>
+                        <p>{entry.evidenceMode === "extraction" ? "Measured from exact source-span matches; not model self-confidence." : "Generated draft requires claim-by-claim source verification."}</p>
+                      </div>
+                    )}
+                    {entry.releaseBlockReason && <div className="release-block"><b>Abstained from patient view</b><span>{entry.releaseBlockReason}</span></div>}
+                    {entry.patientReleaseState === "clinician_approved" && entry.patientReleaseApprovedBy && (
+                      <div className="release-approved">Approved by {entry.patientReleaseApprovedBy} · source note retained</div>
+                    )}
                     {entry.sourceLabel && <button className="provenance-strip" onClick={() => setToast(`Source opened: ${entry.sourceLabel}`)}><span>Source</span>{entry.sourceLabel}<b>↗</b></button>}
                     {expandedHistory === entry.id && (
                       <div className="history-panel">
@@ -404,20 +481,20 @@ export default function CareWorkspace({ bundle }: { bundle: WorkspaceBundle }) {
       <aside className="right-rail">
         <section className="rail-card">
           <div className="rail-heading"><span className="eyebrow">Open actions</span><b>2</b></div>
-          <article className="task-card urgent"><span>Today</span><h3>Place FBC + ferritin orders</h3><p>Blocks staff follow-up confirmation</p><div><span className="mini-avatar">DL</span><button onClick={() => jumpToSource("entry-ai-doctor-20260402")}>Source ↘</button></div></article>
-          <article className="task-card"><span>4 Apr</span><h3>Confirm follow-up slot</h3><p>After lab order is placed</p><div><span className="mini-avatar coral">AR</span><button onClick={() => jumpToSource("entry-staff-20260401")}>Source ↘</button></div></article>
+          <article className="task-card urgent"><span>Today</span><h3>Place FBC + ferritin orders</h3><p>Blocks staff follow-up confirmation</p><div><span className="mini-avatar">DL</span><button onClick={() => jumpToSource("entry-ai-doctor-20260402", "The lab order is not yet placed.")}>Source ↘</button></div></article>
+          <article className="task-card"><span>4 Apr</span><h3>Confirm follow-up slot</h3><p>After lab order is placed</p><div><span className="mini-avatar coral">AR</span><button onClick={() => jumpToSource("entry-staff-20260401", "Waiting for clinician to place the FBC and ferritin orders")}>Source ↘</button></div></article>
         </section>
         <section className="rail-card trust-card">
           <span className="eyebrow">Trust ledger</span>
-          <h3>Every insight is accountable</h3>
-          <ul><li><span>✓</span>4/4 highlights resolve</li><li><span>✓</span>AI entries stay distinct</li><li><span>✓</span>Edits create versions</li><li><span>✓</span>Role scope checked server-side</li></ul>
+          <h3>Every insight has a failure path</h3>
+          <ul><li><span>✓</span>4/4 exact spans resolve</li><li><span>✓</span>AI extraction stays distinct</li><li><span>✓</span>Critical risk floor is locked</li><li><span>✓</span>Patient draft release is blocked</li></ul>
           <button onClick={() => setToast("Audit log records actor, action, resource, outcome and versions — not raw PHI")}>View audit events</button>
         </section>
         <section className="rail-card learning-card">
-          <span className="eyebrow">Importance learning</span>
-          <div className="learning-score"><strong>+12</strong><span>adherence signals</span></div>
-          <p>Clinician confirmations increase the priority of similar future suggestions. Rejections lower it.</p>
-          <div className="micro-bars"><span style={{ width: "78%" }} /><span style={{ width: "62%" }} /><span style={{ width: "46%" }} /></div>
+          <span className="eyebrow">Evaluation + abstention</span>
+          <div className="learning-score"><strong>1/1</strong><span>claims anchored per Glance item</span></div>
+          <p>“Confidence” means measured evidence coverage. A broken anchor removes the item from Glance; it never becomes a lower-confidence guess.</p>
+          <ul className="guardrail-list"><li>Shadow holdout is the next exposure-bias gate</li><li>Reject ≠ automatic demotion</li><li>Critical classes ignore learned down-rank</li></ul>
         </section>
       </aside>
 

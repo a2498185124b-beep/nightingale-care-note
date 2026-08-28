@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { demoComments, demoEntries, demoEntryVersions, demoHighlights, demoUsers } from "@/lib/demo-data";
+import { demoComments, demoConflicts, demoEntries, demoEntryVersions, demoHighlights, demoUsers } from "@/lib/demo-data";
 import type { DemoUser } from "@/lib/demo-data";
 import { canViewEntry } from "@/lib/auth";
 
@@ -14,12 +14,13 @@ const schemaStatements = [
   `CREATE TABLE IF NOT EXISTS clinics (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, clinic_id TEXT NOT NULL, name TEXT NOT NULL, role TEXT NOT NULL, FOREIGN KEY (clinic_id) REFERENCES clinics(id))`,
   `CREATE TABLE IF NOT EXISTS patients (id TEXT PRIMARY KEY, clinic_id TEXT NOT NULL, display_name TEXT NOT NULL, synthetic_mrn TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (clinic_id) REFERENCES clinics(id))`,
-  `CREATE TABLE IF NOT EXISTS entries (id TEXT PRIMARY KEY, clinic_id TEXT NOT NULL, patient_id TEXT NOT NULL, author_id TEXT NOT NULL, author_name TEXT NOT NULL, author_role TEXT NOT NULL, entry_type TEXT NOT NULL, title TEXT NOT NULL, content TEXT NOT NULL, patient_visible INTEGER NOT NULL DEFAULT 0, risk_level TEXT NOT NULL DEFAULT 'routine', review_state TEXT NOT NULL DEFAULT 'manual', source_label TEXT, source_session_id TEXT, confidence_basis_points INTEGER, version INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+  `CREATE TABLE IF NOT EXISTS entries (id TEXT PRIMARY KEY, clinic_id TEXT NOT NULL, patient_id TEXT NOT NULL, author_id TEXT NOT NULL, author_name TEXT NOT NULL, author_role TEXT NOT NULL, entry_type TEXT NOT NULL, title TEXT NOT NULL, content TEXT NOT NULL, patient_visible INTEGER NOT NULL DEFAULT 0, risk_level TEXT NOT NULL DEFAULT 'routine', review_state TEXT NOT NULL DEFAULT 'manual', source_label TEXT, source_session_id TEXT, confidence_basis_points INTEGER, evidence_mode TEXT NOT NULL DEFAULT 'extraction', evidence_coverage_basis_points INTEGER, patient_release_state TEXT NOT NULL DEFAULT 'not_applicable', patient_release_approved_by TEXT, patient_release_approved_at TEXT, release_block_reason TEXT, version INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE TABLE IF NOT EXISTS entry_versions (id TEXT PRIMARY KEY, entry_id TEXT NOT NULL, version INTEGER NOT NULL, content TEXT NOT NULL, changed_by TEXT NOT NULL, changed_by_role TEXT NOT NULL, change_reason TEXT NOT NULL DEFAULT 'edit', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(entry_id, version), FOREIGN KEY (entry_id) REFERENCES entries(id))`,
   `CREATE TABLE IF NOT EXISTS comments (id TEXT PRIMARY KEY, entry_id TEXT NOT NULL, clinic_id TEXT NOT NULL, author_id TEXT NOT NULL, author_name TEXT NOT NULL, author_role TEXT NOT NULL, body TEXT NOT NULL, resolved INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (entry_id) REFERENCES entries(id))`,
-  `CREATE TABLE IF NOT EXISTS highlights (id TEXT PRIMARY KEY, clinic_id TEXT NOT NULL, patient_id TEXT NOT NULL, title TEXT NOT NULL, detail TEXT NOT NULL, category TEXT NOT NULL, severity TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'suggested', risk_reason TEXT NOT NULL, source_entry_id TEXT NOT NULL, source_version INTEGER NOT NULL, source_quote TEXT NOT NULL, source_start INTEGER, source_end INTEGER, source_fragment_hash TEXT, score INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (source_entry_id) REFERENCES entries(id))`,
+  `CREATE TABLE IF NOT EXISTS highlights (id TEXT PRIMARY KEY, clinic_id TEXT NOT NULL, patient_id TEXT NOT NULL, title TEXT NOT NULL, detail TEXT NOT NULL, category TEXT NOT NULL, severity TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'suggested', risk_reason TEXT NOT NULL, source_entry_id TEXT NOT NULL, source_version INTEGER NOT NULL, source_quote TEXT NOT NULL, source_start INTEGER, source_end INTEGER, source_fragment_hash TEXT, score INTEGER NOT NULL, evidence_basis_points INTEGER NOT NULL DEFAULT 0, evidence_method TEXT NOT NULL DEFAULT 'exact_span', evidence_state TEXT NOT NULL DEFAULT 'review_required', failure_action TEXT NOT NULL DEFAULT 'queue_review', risk_floor_rule TEXT, score_breakdown_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (source_entry_id) REFERENCES entries(id))`,
   `CREATE TABLE IF NOT EXISTS provenance (id TEXT PRIMARY KEY, target_type TEXT NOT NULL, target_id TEXT NOT NULL, target_version INTEGER, source_entry_id TEXT, source_version INTEGER, source_span TEXT, source_uri TEXT, generated_by TEXT NOT NULL, model_version TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
-  `CREATE TABLE IF NOT EXISTS importance_feedback (id TEXT PRIMARY KEY, clinic_id TEXT NOT NULL, actor_id TEXT NOT NULL, highlight_id TEXT NOT NULL, signal_key TEXT NOT NULL, action TEXT NOT NULL, weight_delta INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+  `CREATE TABLE IF NOT EXISTS importance_feedback (id TEXT PRIMARY KEY, clinic_id TEXT NOT NULL, actor_id TEXT NOT NULL, highlight_id TEXT NOT NULL, signal_key TEXT NOT NULL, action TEXT NOT NULL, weight_delta INTEGER NOT NULL, eligible_for_learning INTEGER NOT NULL DEFAULT 0, learning_reason TEXT NOT NULL DEFAULT 'unclassified', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+  `CREATE TABLE IF NOT EXISTS clinical_conflicts (id TEXT PRIMARY KEY, clinic_id TEXT NOT NULL, patient_id TEXT NOT NULL, domain TEXT NOT NULL, severity TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open', summary TEXT NOT NULL, detection_rule TEXT NOT NULL, failure_action TEXT NOT NULL, left_entry_id TEXT NOT NULL, left_version INTEGER NOT NULL, left_quote TEXT NOT NULL, left_role TEXT NOT NULL, right_entry_id TEXT NOT NULL, right_version INTEGER NOT NULL, right_quote TEXT NOT NULL, right_role TEXT NOT NULL, resolution TEXT, resolved_by TEXT, resolved_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE TABLE IF NOT EXISTS audit_events (id TEXT PRIMARY KEY, request_id TEXT NOT NULL, clinic_id TEXT NOT NULL, actor_id TEXT NOT NULL, actor_role TEXT NOT NULL, action TEXT NOT NULL, resource_type TEXT NOT NULL, resource_id TEXT NOT NULL, outcome TEXT NOT NULL, before_version INTEGER, after_version INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE INDEX IF NOT EXISTS entries_patient_time_idx ON entries(patient_id, created_at DESC)`,
   `CREATE INDEX IF NOT EXISTS highlights_patient_score_idx ON highlights(patient_id, score DESC)`,
@@ -44,9 +45,9 @@ export async function ensureDatabase() {
       for (const entry of demoEntries) {
         inserts.push(
           db.prepare(`INSERT OR IGNORE INTO entries
-            (id, clinic_id, patient_id, author_id, author_name, author_role, entry_type, title, content, patient_visible, risk_level, review_state, source_label, confidence_basis_points, version, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-            .bind(entry.id, entry.clinicId, entry.patientId, entry.authorId, entry.authorName, entry.authorRole, entry.type, entry.title, entry.content, entry.patientVisible ? 1 : 0, entry.riskLevel, entry.reviewState ?? "manual", entry.sourceLabel ?? null, entry.confidence ? Math.round(entry.confidence * 10000) : null, entry.version, entry.createdAt, entry.createdAt),
+            (id, clinic_id, patient_id, author_id, author_name, author_role, entry_type, title, content, patient_visible, risk_level, review_state, source_label, confidence_basis_points, evidence_mode, evidence_coverage_basis_points, patient_release_state, patient_release_approved_by, patient_release_approved_at, release_block_reason, version, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+            .bind(entry.id, entry.clinicId, entry.patientId, entry.authorId, entry.authorName, entry.authorRole, entry.type, entry.title, entry.content, entry.patientVisible ? 1 : 0, entry.riskLevel, entry.reviewState ?? "manual", entry.sourceLabel ?? null, null, entry.evidenceMode ?? "extraction", entry.evidenceCoverageBasisPoints ?? null, entry.patientReleaseState ?? "not_applicable", entry.patientReleaseApprovedBy ?? null, entry.patientReleaseApprovedAt ?? null, entry.releaseBlockReason ?? null, entry.version, entry.createdAt, entry.createdAt),
         );
         for (const historical of demoEntryVersions.filter((version) => version.entryId === entry.id)) {
           inserts.push(
@@ -62,9 +63,9 @@ export async function ensureDatabase() {
       for (const item of demoHighlights) {
         inserts.push(
           db.prepare(`INSERT OR IGNORE INTO highlights
-            (id, clinic_id, patient_id, title, detail, category, severity, status, risk_reason, source_entry_id, source_version, source_quote, score)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-            .bind(item.id, "clinic-eastshore", "patient-maya", item.title, item.detail, item.category, item.severity, item.status, item.riskReason, item.sourceEntryId, item.sourceVersion, item.sourceQuote, item.score),
+            (id, clinic_id, patient_id, title, detail, category, severity, status, risk_reason, source_entry_id, source_version, source_quote, score, evidence_basis_points, evidence_method, evidence_state, failure_action, risk_floor_rule, score_breakdown_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+            .bind(item.id, "clinic-eastshore", "patient-maya", item.title, item.detail, item.category, item.severity, item.status, item.riskReason, item.sourceEntryId, item.sourceVersion, item.sourceQuote, item.score, item.evidence.basisPoints, item.evidence.method, item.evidence.state, item.evidence.failureAction, item.riskFloorRule ?? null, JSON.stringify(item.scoreBreakdown)),
         );
         inserts.push(
           db.prepare("INSERT OR IGNORE INTO provenance (id, target_type, target_id, target_version, source_entry_id, source_version, source_span, generated_by, model_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
@@ -76,6 +77,14 @@ export async function ensureDatabase() {
         inserts.push(
           db.prepare("INSERT OR IGNORE INTO comments (id, entry_id, clinic_id, author_id, author_name, author_role, body, resolved, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
             .bind(comment.id, comment.entryId, author.clinicId, author.id, comment.authorName, comment.authorRole, comment.body, comment.resolved ? 1 : 0, comment.createdAt),
+        );
+      }
+      for (const conflict of demoConflicts) {
+        inserts.push(
+          db.prepare(`INSERT OR IGNORE INTO clinical_conflicts
+            (id, clinic_id, patient_id, domain, severity, status, summary, detection_rule, failure_action, left_entry_id, left_version, left_quote, left_role, right_entry_id, right_version, right_quote, right_role, resolution)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+            .bind(conflict.id, "clinic-eastshore", "patient-maya", conflict.domain, conflict.severity, conflict.status, conflict.summary, conflict.detectionRule, conflict.failureAction, conflict.left.entryId, conflict.left.version, conflict.left.quote, conflict.left.role, conflict.right.entryId, conflict.right.version, conflict.right.quote, conflict.right.role, conflict.resolution ?? null),
         );
       }
       await db.batch(inserts);
@@ -102,6 +111,12 @@ export type EntryRow = {
   review_state: "pending_review" | "clinician_confirmed" | "manual";
   source_label: string | null;
   confidence_basis_points: number | null;
+  evidence_mode: "extraction" | "generation";
+  evidence_coverage_basis_points: number | null;
+  patient_release_state: "not_applicable" | "draft" | "clinician_approved" | "rule_verified";
+  patient_release_approved_by: string | null;
+  patient_release_approved_at: string | null;
+  release_block_reason: string | null;
   version: number;
   created_at: string;
 };
@@ -153,14 +168,28 @@ export async function addComment(user: DemoUser, entry: EntryRow, body: string) 
 export async function reviewHighlight(user: DemoUser, id: string, status: "accepted" | "rejected") {
   await ensureDatabase();
   const db = d1();
-  const highlight = await db.prepare("SELECT id, clinic_id, category, status FROM highlights WHERE id = ?").bind(id).first<{ id: string; clinic_id: string; category: string; status: string }>();
+  const highlight = await db.prepare("SELECT id, clinic_id, category, severity, status FROM highlights WHERE id = ?").bind(id).first<{ id: string; clinic_id: string; category: string; severity: string; status: string }>();
   if (!highlight || highlight.clinic_id !== user.clinicId) return false;
+  const eligible = status === "accepted" && highlight.severity !== "critical";
+  const weightDelta = eligible ? 4 : 0;
+  const learningReason = highlight.severity === "critical"
+    ? "critical_safety_floor_locked"
+    : status === "rejected"
+      ? "rejection_requires_reason_before_learning"
+      : "bounded_positive_confirmation";
   await db.batch([
     db.prepare("UPDATE highlights SET status = ? WHERE id = ?").bind(status, id),
-    db.prepare("INSERT INTO importance_feedback (id, clinic_id, actor_id, highlight_id, signal_key, action, weight_delta) VALUES (?, ?, ?, ?, ?, ?, ?)")
-      .bind(crypto.randomUUID(), user.clinicId, user.id, id, highlight.category, status, status === "accepted" ? 12 : -8),
+    db.prepare("INSERT INTO importance_feedback (id, clinic_id, actor_id, highlight_id, signal_key, action, weight_delta, eligible_for_learning, learning_reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .bind(crypto.randomUUID(), user.clinicId, user.id, id, highlight.category, status, weightDelta, eligible ? 1 : 0, learningReason),
   ]);
   return true;
+}
+
+export async function resolveConflict(user: DemoUser, id: string, resolution: string) {
+  await ensureDatabase();
+  const result = await d1().prepare("UPDATE clinical_conflicts SET status = 'resolved', resolution = ?, resolved_by = ?, resolved_at = CURRENT_TIMESTAMP WHERE id = ? AND clinic_id = ? AND status = 'open'")
+    .bind(resolution, user.id, id, user.clinicId).run();
+  return Boolean(result.meta.changes);
 }
 
 export async function getAuditEvents(user: DemoUser) {
@@ -174,12 +203,20 @@ export async function getCareData(user: DemoUser) {
   await ensureDatabase();
   const db = d1();
   const entryResult = await db.prepare("SELECT * FROM entries WHERE clinic_id = ? ORDER BY created_at DESC").bind(user.clinicId).all<EntryRow>();
-  const visibleRows = entryResult.results.filter((entry) => canViewEntry(user, { clinicId: entry.clinic_id, authorRole: entry.author_role, patientVisible: Boolean(entry.patient_visible) }));
+  const visibleRows = entryResult.results.filter((entry) => canViewEntry(user, {
+    clinicId: entry.clinic_id,
+    authorRole: entry.author_role,
+    patientVisible: Boolean(entry.patient_visible),
+    patientReleaseState: entry.patient_release_state,
+  }));
   const visibleIds = new Set(visibleRows.map((entry) => entry.id));
   const highlightResult = await db.prepare("SELECT * FROM highlights WHERE clinic_id = ? ORDER BY score DESC").bind(user.clinicId).all<Record<string, unknown>>();
   const commentResult = user.role === "patient"
     ? { results: [] as Record<string, unknown>[] }
     : await db.prepare("SELECT * FROM comments WHERE clinic_id = ? ORDER BY created_at ASC").bind(user.clinicId).all<Record<string, unknown>>();
+  const conflictResult = user.role === "patient"
+    ? { results: [] as Record<string, unknown>[] }
+    : await db.prepare("SELECT * FROM clinical_conflicts WHERE clinic_id = ? ORDER BY status ASC, created_at DESC").bind(user.clinicId).all<Record<string, unknown>>();
   return {
     entries: visibleRows.map((entry) => ({
       id: entry.id,
@@ -196,8 +233,13 @@ export async function getCareData(user: DemoUser) {
       riskLevel: entry.risk_level,
       version: entry.version,
       sourceLabel: entry.source_label ?? undefined,
-      confidence: entry.confidence_basis_points ? entry.confidence_basis_points / 10000 : undefined,
+      evidenceMode: entry.evidence_mode,
+      evidenceCoverageBasisPoints: entry.evidence_coverage_basis_points ?? undefined,
       reviewState: entry.review_state,
+      patientReleaseState: entry.patient_release_state,
+      patientReleaseApprovedBy: entry.patient_release_approved_by ?? undefined,
+      patientReleaseApprovedAt: entry.patient_release_approved_at ?? undefined,
+      releaseBlockReason: entry.release_block_reason ?? undefined,
     })),
     highlights: highlightResult.results
       .filter((item) => visibleIds.has(String(item.source_entry_id)))
@@ -206,6 +248,13 @@ export async function getCareData(user: DemoUser) {
         severity: item.severity, status: item.status, riskReason: String(item.risk_reason),
         sourceEntryId: String(item.source_entry_id), sourceVersion: Number(item.source_version),
         sourceQuote: String(item.source_quote), score: Number(item.score),
+        evidence: {
+          method: item.evidence_method, verifiedClaims: Number(item.evidence_basis_points) === 10000 ? 1 : 0,
+          totalClaims: 1, basisPoints: Number(item.evidence_basis_points), state: item.evidence_state,
+          failureAction: String(item.failure_action),
+        },
+        scoreBreakdown: JSON.parse(String(item.score_breakdown_json || "{}")),
+        riskFloorRule: item.risk_floor_rule ? String(item.risk_floor_rule) : undefined,
       })),
     comments: commentResult.results
       .filter((item) => visibleIds.has(String(item.entry_id)))
@@ -214,5 +263,12 @@ export async function getCareData(user: DemoUser) {
         authorRole: item.author_role, body: String(item.body), createdAt: String(item.created_at),
         resolved: Boolean(item.resolved),
       })),
+    conflicts: conflictResult.results.map((item) => ({
+      id: String(item.id), domain: item.domain, severity: item.severity, status: item.status,
+      summary: String(item.summary), detectionRule: String(item.detection_rule), failureAction: String(item.failure_action),
+      left: { entryId: String(item.left_entry_id), version: Number(item.left_version), quote: String(item.left_quote), role: String(item.left_role) },
+      right: { entryId: String(item.right_entry_id), version: Number(item.right_version), quote: String(item.right_quote), role: String(item.right_role) },
+      resolution: item.resolution ? String(item.resolution) : undefined,
+    })),
   };
 }

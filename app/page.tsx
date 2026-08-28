@@ -1,6 +1,6 @@
 import CareWorkspace from "./CareWorkspace";
 import { cookies } from "next/headers";
-import { demoComments, demoEntries, demoHighlights, demoUsers, initialBundle } from "@/lib/demo-data";
+import { demoComments, demoConflicts, demoEntries, demoHighlights, demoUsers, initialBundle } from "@/lib/demo-data";
 import { canViewEntry } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +18,7 @@ export default async function Home() {
     entries,
     comments: user.role === "patient" ? [] : demoComments.filter((comment) => entryIds.has(comment.entryId)),
     highlights: demoHighlights.filter((highlight) => entryIds.has(highlight.sourceEntryId)),
+    conflicts: user.role === "patient" ? [] : demoConflicts,
   };
   return <CareWorkspace bundle={bundle} />;
 }

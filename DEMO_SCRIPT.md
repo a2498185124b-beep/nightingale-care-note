@@ -8,14 +8,15 @@ Say: “EHRs give us dated fragments. Nightingale turns them into a shared longi
 
 Point to the four Top Cards and the two open actions. Mention that the view is deliberately capped to avoid alert fatigue.
 
-## 0:20–1:05 · Scenario A: Glance View + AI scribe provenance
+## 0:20–1:05 · Scenario A: evidence, risk and abstention
 
 1. Click **View source** on “Dizziness is worsening.”
-2. Show the exact AI doctor-consult entry and its source strip: session plus timestamp range.
-3. Point out **Not clinician confirmed**.
-4. Return to the Top Card and accept “Place FBC + ferritin orders.”
+2. Show that the exact quoted words—not only the entry—are highlighted.
+3. Point out **Evidence 1/1**, the importance-score breakdown and **If wrong** behavior.
+4. On the allergy card, show `RF-ALLERGY-001`: the critical floor cannot be learned down.
+5. Return and accept “Place FBC + ferritin orders.”
 
-Say: “Acceptance is fast, but never blind: the card explains why it ranked, shows the original text and records the clinician’s decision. That feedback also increases the future weight of similar unresolved-action signals.”
+Say: “This is not model self-confidence. Evidence coverage means verified claims divided by total claims. If an anchor breaks, the card disappears and the system abstains instead of guessing. Acceptance may add a small bounded weight; rejection is logged but does not silently suppress future alerts.”
 
 ## 1:05–1:55 · Scenario B: collaboration, audit and revision
 
@@ -28,20 +29,20 @@ Say: “Acceptance is fast, but never blind: the card explains why it ranked, sh
 
 Say: “Staff cannot overwrite clinician content and clinicians cannot overwrite staff notes. This is enforced by the API, not by hidden buttons.”
 
-## 1:55–2:35 · Scenario C: longitudinal context and patient boundary
+## 1:55–2:35 · Scenario C: human conflict and patient boundary
 
-1. Filter the timeline to **AI scribe**, then **Staff**, then **All activity**.
-2. Show the 2025 clinician-confirmed plan alongside 2026 AI and staff entries.
-3. Switch to **Patient view**.
-4. Show that raw AI notes, staff notes and internal comments disappear; only patient-facing instructions remain.
+1. Open the dose-conflict banner: Staff reports `200 mg twice daily`; the clinician note says `200 mg once daily`.
+2. Use both source buttons and explain that neither human note is overwritten.
+3. Show the generated after-visit draft marked **Release blocked**, then resolve the conflict as Clinician.
+4. Switch to **Patient view** and show that raw AI, internal notes/comments and unapproved generated content remain hidden.
 
-Say: “The same longitudinal record serves different roles, but the server releases only the fields and entries each role is allowed to see.”
+Say: “Contradictions can occur between humans too. The scoped rule detects the disagreement, preserves both sources and blocks patient release until a clinician adjudicates it. Resolution alone does not auto-publish the draft; explicit approval is still required.”
 
 ## 2:35–3:00 · Safety and architecture close
 
 Point to the **Trust ledger** and **Importance learning** panel.
 
-Say: “All data here is synthetic. In the model path, names, Singapore-style IDs, phone numbers and emails are redacted before any external LLM boundary. Provenance records how a version was produced; the append-only audit log records who accessed or changed it. For a 72-hour build, we focused on one complete trust loop: glance, trace, decide, version and audit.”
+Say: “All data here is synthetic. The redaction test checks both identifier removal and preservation of medication facts, then fails closed on a residual pattern. The OpenAI integration is only a strict-schema request descriptor with `store: false`; no external model call runs. Structured output controls shape, while exact-span verification controls evidence.”
 
 Close with: “Trusted context. Clear next steps.”
 
@@ -51,5 +52,4 @@ Close with: “Trusted context. Clear next steps.”
 - Blur no content: all fixtures are synthetic.
 - Ensure every source jump lands visibly and the accepted-card state changes.
 - Keep the final frame on the Glance View with the Nightingale title visible.
-- Add captions for the terms RBAC, provenance, optimistic conflict and pre-LLM redaction.
-
+- Add captions for RBAC, evidence coverage, abstention, safety floor, provenance and pre-LLM redaction.

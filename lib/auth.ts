@@ -13,9 +13,11 @@ export function sessionCookie(userId: string) {
   return `${COOKIE_NAME}=${encodeURIComponent(userId)}; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=86400`;
 }
 
-export function canViewEntry(user: DemoUser, entry: Pick<CareEntry, "clinicId" | "authorRole" | "patientVisible">) {
+export function canViewEntry(user: DemoUser, entry: Pick<CareEntry, "clinicId" | "authorRole" | "patientVisible" | "patientReleaseState">) {
   if (entry.clinicId !== user.clinicId) return false;
-  if (user.role === "patient") return entry.patientVisible;
+  if (user.role === "patient") {
+    return entry.patientVisible && ["clinician_approved", "rule_verified"].includes(entry.patientReleaseState ?? "not_applicable");
+  }
   if (user.role === "staff") return entry.authorRole !== "clinician";
   return user.role === "clinician" || user.role === "admin";
 }
@@ -36,3 +38,6 @@ export function canReviewHighlights(user: DemoUser) {
   return user.role === "clinician";
 }
 
+export function canResolveConflicts(user: DemoUser) {
+  return user.role === "clinician";
+}

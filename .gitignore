@@ -42,6 +42,6 @@ next-env.d.ts
 /work/
 /tmp/
 
-# Python caches
+# Python test caches
 __pycache__/
 *.py[cod]

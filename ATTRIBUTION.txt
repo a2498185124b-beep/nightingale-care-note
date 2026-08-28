@@ -1,5 +1,5 @@
 Nightingale Care Note — External Components and Attribution
-Generated: 2026-08-26
+Generated: 2026-08-28
 
 RUNTIME / BUILD DEPENDENCIES
 
@@ -14,7 +14,7 @@ Wrangler 4.92.0 — MIT OR Apache-2.0 — https://github.com/cloudflare/workers-
 
 MODELS / GENERATED ASSETS
 
-No LLM is called by the running prototype. lib/llm-gateway.ts is a redaction-enforced boundary stub.
+No LLM is called by the running prototype. lib/llm-gateway.ts is a redaction-enforced boundary that returns an inspectable OpenAI Responses API request descriptor for gpt-5.6 with store:false and strict Structured Outputs. The descriptor is never sent, so no model-produced content or model license is bundled with the application. OpenAI service usage, if enabled later, would be governed by the applicable OpenAI terms rather than an open-source license.
 public/og.png was generated specifically for this project with ChatGPT's built-in image-generation capability. The underlying model version was not exposed to the project and is therefore not guessed here. Usage is governed by the applicable OpenAI terms, not represented as an open-source license.
 
 DATA

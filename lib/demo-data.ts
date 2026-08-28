@@ -23,8 +23,31 @@ export type CareEntry = {
   riskLevel: "critical" | "high" | "medium" | "routine";
   version: number;
   sourceLabel?: string;
-  confidence?: number;
+  evidenceMode?: "extraction" | "generation";
+  evidenceCoverageBasisPoints?: number;
   reviewState?: "pending_review" | "clinician_confirmed" | "manual";
+  patientReleaseState?: "not_applicable" | "draft" | "clinician_approved" | "rule_verified";
+  patientReleaseApprovedBy?: string;
+  patientReleaseApprovedAt?: string;
+  releaseBlockReason?: string;
+};
+
+export type EvidenceEvaluation = {
+  method: "exact_span" | "structured_source_match";
+  verifiedClaims: number;
+  totalClaims: number;
+  basisPoints: number;
+  state: "verified" | "review_required" | "abstained";
+  failureAction: string;
+};
+
+export type ScoreBreakdown = {
+  risk: number;
+  recency: number;
+  action: number;
+  entity: number;
+  feedback: number;
+  safetyFloor: number;
 };
 
 export type Highlight = {
@@ -39,7 +62,23 @@ export type Highlight = {
   sourceVersion: number;
   sourceQuote: string;
   score: number;
+  evidence: EvidenceEvaluation;
+  scoreBreakdown: ScoreBreakdown;
+  riskFloorRule?: string;
   dueLabel?: string;
+};
+
+export type ClinicalConflict = {
+  id: string;
+  domain: "allergy" | "medication" | "dose";
+  severity: "critical" | "high";
+  status: "open" | "resolved";
+  summary: string;
+  detectionRule: string;
+  failureAction: string;
+  left: { entryId: string; version: number; quote: string; role: string };
+  right: { entryId: string; version: number; quote: string; role: string };
+  resolution?: string;
 };
 
 export type Comment = {
@@ -85,8 +124,10 @@ export const demoEntries: CareEntry[] = [
     riskLevel: "high",
     version: 1,
     sourceLabel: "Consult audio · session S-2048 · 08:11–10:26",
-    confidence: 0.91,
+    evidenceMode: "extraction",
+    evidenceCoverageBasisPoints: 10000,
     reviewState: "pending_review",
+    patientReleaseState: "not_applicable",
   },
   {
     id: "entry-staff-20260401",
@@ -98,12 +139,13 @@ export const demoEntries: CareEntry[] = [
     type: "staff_note",
     title: "Follow-up coordination",
     content:
-      "Patient can attend after 3 PM. Waiting for clinician to place the FBC and ferritin orders before staff confirms the follow-up slot. Assigned to Aisha; due 4 Apr.",
+      "Patient can attend after 3 PM. Waiting for clinician to place the FBC and ferritin orders before staff confirms the follow-up slot. Patient reports the iron label says 200 mg twice daily. Assigned to Aisha; due 4 Apr.",
     createdAt: "2026-04-01T16:18:00+08:00",
     patientVisible: false,
     riskLevel: "medium",
     version: 2,
     reviewState: "manual",
+    patientReleaseState: "not_applicable",
   },
   {
     id: "entry-ai-patient-20260331",
@@ -121,8 +163,10 @@ export const demoEntries: CareEntry[] = [
     riskLevel: "medium",
     version: 1,
     sourceLabel: "Patient AI session · S-2019 · messages 4–8",
-    confidence: 0.86,
+    evidenceMode: "extraction",
+    evidenceCoverageBasisPoints: 10000,
     reviewState: "pending_review",
+    patientReleaseState: "not_applicable",
   },
   {
     id: "entry-clinician-20250818",
@@ -134,12 +178,37 @@ export const demoEntries: CareEntry[] = [
     type: "clinician_note",
     title: "Confirmed care plan",
     content:
-      "Iron-deficiency anaemia, improving on oral iron. Continue current dose with food if tolerated. Avoid penicillin. Return earlier for fainting, chest pain, shortness of breath at rest, or rapid worsening.",
+      "Iron-deficiency anaemia, improving on oral iron. Continue ferrous fumarate 200 mg once daily with food if tolerated. Avoid penicillin. Return earlier for fainting, chest pain, shortness of breath at rest, or rapid worsening.",
     createdAt: "2025-08-18T11:23:00+08:00",
     patientVisible: true,
     riskLevel: "routine",
     version: 3,
     reviewState: "clinician_confirmed",
+    patientReleaseState: "clinician_approved",
+    patientReleaseApprovedBy: "Dr. Daniel Lim",
+    patientReleaseApprovedAt: "2025-08-18T11:23:00+08:00",
+  },
+  {
+    id: "entry-patient-draft-20260402",
+    clinicId: "clinic-eastshore",
+    patientId: "patient-maya",
+    authorId: "system",
+    authorName: "AI patient instruction draft",
+    authorRole: "system",
+    type: "ai_patient_instruction_draft",
+    title: "After-visit instructions · blocked draft",
+    content:
+      "Continue iron 200 mg once daily with food, avoid penicillin, complete FBC and ferritin tests, and seek earlier care for fainting, chest pain, breathlessness at rest, or rapid worsening.",
+    createdAt: "2026-04-02T09:43:00+08:00",
+    patientVisible: false,
+    riskLevel: "high",
+    version: 1,
+    sourceLabel: "Generated from clinician note v3 + consult summary v1",
+    evidenceMode: "generation",
+    evidenceCoverageBasisPoints: 7500,
+    reviewState: "pending_review",
+    patientReleaseState: "draft",
+    releaseBlockReason: "Unresolved iron-dose conflict and clinician approval required",
   },
 ];
 
@@ -163,7 +232,7 @@ export const demoEntryVersions: EntryVersionSeed[] = [
   {
     entryId: "entry-clinician-20250818",
     version: 2,
-    content: "Iron-deficiency anaemia, improving on oral iron. Continue current dose with food if tolerated. Avoid penicillin. Review if symptoms worsen.",
+    content: "Iron-deficiency anaemia, improving on oral iron. Continue ferrous fumarate 200 mg once daily with food if tolerated. Avoid penicillin. Review if symptoms worsen.",
     changedBy: "usr-clinician",
     changedByRole: "clinician",
     createdAt: "2025-08-18T11:16:00+08:00",
@@ -183,6 +252,9 @@ export const demoHighlights: Highlight[] = [
     sourceVersion: 1,
     sourceQuote: "Penicillin allergy was reconfirmed.",
     score: 98,
+    evidence: { method: "exact_span", verifiedClaims: 1, totalClaims: 1, basisPoints: 10000, state: "verified", failureAction: "Broken source anchor → remove from Glance and queue review" },
+    scoreBreakdown: { risk: 60, recency: 12, action: 0, entity: 12, feedback: 4, safetyFloor: 10 },
+    riskFloorRule: "RF-ALLERGY-001 · medication allergy is never demoted below critical",
   },
   {
     id: "highlight-labs",
@@ -196,6 +268,8 @@ export const demoHighlights: Highlight[] = [
     sourceVersion: 1,
     sourceQuote: "The lab order is not yet placed.",
     score: 94,
+    evidence: { method: "exact_span", verifiedClaims: 1, totalClaims: 1, basisPoints: 10000, state: "verified", failureAction: "Missing order-state anchor → abstain and request manual task review" },
+    scoreBreakdown: { risk: 25, recency: 20, action: 32, entity: 10, feedback: 7, safetyFloor: 0 },
     dueLabel: "Due today",
   },
   {
@@ -208,8 +282,10 @@ export const demoHighlights: Highlight[] = [
     riskReason: "Recent symptom change · frequency increased",
     sourceEntryId: "entry-ai-doctor-20260402",
     sourceVersion: 1,
-    sourceQuote: "Increasing dizziness after standing, now occurring 3–4 times weekly.",
+    sourceQuote: "increasing dizziness after standing, now occurring 3–4 times weekly.",
     score: 91,
+    evidence: { method: "exact_span", verifiedClaims: 1, totalClaims: 1, basisPoints: 10000, state: "verified", failureAction: "Frequency or span mismatch → abstain and show original consult only" },
+    scoreBreakdown: { risk: 35, recency: 24, action: 8, entity: 12, feedback: 12, safetyFloor: 0 },
   },
   {
     id: "highlight-adherence",
@@ -221,8 +297,24 @@ export const demoHighlights: Highlight[] = [
     riskReason: "Patient-reported barrier · affects active treatment",
     sourceEntryId: "entry-ai-patient-20260331",
     sourceVersion: 1,
-    sourceQuote: "Missing two iron doses this week because of nausea.",
+    sourceQuote: "missing two iron doses this week because of nausea",
     score: 82,
+    evidence: { method: "exact_span", verifiedClaims: 1, totalClaims: 1, basisPoints: 10000, state: "verified", failureAction: "Source mismatch → remove suggestion; never infer adherence" },
+    scoreBreakdown: { risk: 20, recency: 20, action: 12, entity: 10, feedback: 20, safetyFloor: 0 },
+  },
+];
+
+export const demoConflicts: ClinicalConflict[] = [
+  {
+    id: "conflict-iron-dose",
+    domain: "dose",
+    severity: "high",
+    status: "open",
+    summary: "Ferrous fumarate frequency differs across two human-authored notes",
+    detectionRule: "CF-DOSE-001 · same medication + same strength + different frequency",
+    failureAction: "Abstain from patient release; clinician must compare both sources",
+    left: { entryId: "entry-staff-20260401", version: 2, quote: "iron label says 200 mg twice daily", role: "staff" },
+    right: { entryId: "entry-clinician-20250818", version: 3, quote: "ferrous fumarate 200 mg once daily", role: "clinician" },
   },
 ];
 
@@ -252,6 +344,7 @@ export const initialBundle = {
   currentUser: demoUsers[2],
   users: demoUsers,
   highlights: demoHighlights,
+  conflicts: demoConflicts,
   entries: demoEntries,
   comments: demoComments,
   openTasks: 2,

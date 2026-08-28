@@ -26,6 +26,7 @@ class Note:
     author_role: str
     content: str
     patient_visible: bool = False
+    patient_release_state: str = "not_applicable"
     version: int = 1
     versions: dict[int, str] = field(default_factory=dict)
 
@@ -39,6 +40,8 @@ class CareModel:
         self.audit: list[dict] = []
         self.highlights: dict[str, dict] = {}
         self.signal_weights: dict[str, int] = {}
+        self.feedback_events: list[dict] = []
+        self.conflicts: dict[str, dict] = {}
 
     def add_note(self, note: Note):
         self.notes[note.id] = note
@@ -47,7 +50,7 @@ class CareModel:
         if actor.clinic_id != note.clinic_id:
             return False
         if actor.role == "patient":
-            return note.patient_visible
+            return note.patient_visible and note.patient_release_state in {"clinician_approved", "rule_verified"}
         if actor.role == "staff":
             return note.author_role != "clinician"
         return actor.role in {"clinician", "admin"}
@@ -88,7 +91,7 @@ class CareModel:
         content = note.versions[target_version]
         return self.edit(actor, note_id, content, note.version)
 
-    def add_highlight(self, highlight_id: str, source_note_id: str, source_version: int, source_quote: str, signal_key: str):
+    def add_highlight(self, highlight_id: str, source_note_id: str, source_version: int, source_quote: str, signal_key: str, severity: str = "medium"):
         note = self.notes[source_note_id]
         if source_version not in note.versions or source_quote not in note.versions[source_version]:
             raise ValueError("unresolvable provenance")
@@ -97,6 +100,9 @@ class CareModel:
             "source_version": source_version,
             "source_quote": source_quote,
             "signal_key": signal_key,
+            "severity": severity,
+            "evidence_coverage": 1.0,
+            "evidence_method": "exact_span",
             "score": 50 + self.signal_weights.get(signal_key, 0),
         }
 
@@ -107,8 +113,32 @@ class CareModel:
     def review_highlight(self, actor: Actor, highlight_id: str, accepted: bool):
         if actor.role != "clinician":
             raise PermissionDenied
-        signal = self.highlights[highlight_id]["signal_key"]
-        self.signal_weights[signal] = self.signal_weights.get(signal, 0) + (12 if accepted else -8)
+        item = self.highlights[highlight_id]
+        signal = item["signal_key"]
+        eligible = accepted and item["severity"] != "critical"
+        delta = 4 if eligible else 0
+        reason = "bounded_positive_confirmation" if eligible else (
+            "critical_safety_floor_locked" if item["severity"] == "critical" else "rejection_requires_reason"
+        )
+        self.signal_weights[signal] = max(-20, min(20, self.signal_weights.get(signal, 0) + delta))
+        self.feedback_events.append({"highlight": highlight_id, "eligible": eligible, "delta": delta, "reason": reason})
+
+    def add_dose_conflict(self, conflict_id: str, left_note_id: str, left_quote: str, right_note_id: str, right_quote: str):
+        if left_quote not in self.notes[left_note_id].content or right_quote not in self.notes[right_note_id].content:
+            raise ValueError("unresolvable conflict source")
+        self.conflicts[conflict_id] = {
+            "domain": "dose",
+            "status": "open",
+            "left": (left_note_id, left_quote),
+            "right": (right_note_id, right_quote),
+            "failure_action": "abstain_patient_release",
+        }
+
+    def resolve_conflict(self, actor: Actor, conflict_id: str, resolution: str):
+        if actor.role != "clinician":
+            raise PermissionDenied
+        self.conflicts[conflict_id].update({"status": "resolved", "resolution": resolution})
+        self.audit.append({"actor": actor.id, "action": "conflict.resolve", "resource": conflict_id, "outcome": "success"})
 
 
 def redact_before_llm(text: str) -> str:
@@ -122,4 +152,3 @@ def redact_before_llm(text: str) -> str:
     for pattern, replacement, flags in patterns:
         redacted = re.sub(pattern, replacement, redacted, flags=flags)
     return redacted
-
