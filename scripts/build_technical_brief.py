@@ -116,8 +116,8 @@ def page_one(c):
         leading=14,
     )
 
-    metric(c, 34, HEIGHT - 238, 162, "6.38 ms", "warm SSR P95 / target <= 300 ms")
-    metric(c, 207, HEIGHT - 238, 162, "11 + 1", "domain tests + rendered-shell test", CREAM)
+    metric(c, 34, HEIGHT - 238, 162, "11.68 ms", "warm SSR P95 / target <= 300 ms")
+    metric(c, 207, HEIGHT - 238, 162, "16 + 1", "domain tests + shell check", CREAM)
     metric(c, 380, HEIGHT - 238, 181, "4 / 4", "priority cards resolve to a source")
 
     c.setFillColor(NAVY)
@@ -125,9 +125,9 @@ def page_one(c):
     c.drawString(34, HEIGHT - 272, "Highest-value trust loop")
     steps = [
         ("01", "GLANCE", "Four capped, ranked cards"),
-        ("02", "TRACE", "Entry + version + quote"),
-        ("03", "DECIDE", "Accept, reject or edit"),
-        ("04", "RECOVER", "Snapshot + audit event"),
+        ("02", "VERIFY", "Exact quote + version"),
+        ("03", "DECIDE", "Confirm, reject or edit"),
+        ("04", "ABSTAIN", "Block, review + audit"),
     ]
     x = 34
     for index, (number, title, detail) in enumerate(steps):
@@ -168,8 +168,8 @@ def page_one(c):
     c.setFillColor(CORAL)
     c.setFont(BOLD, 8)
     c.drawString(48, HEIGHT - 545, "AI BOUNDARY")
-    draw_text(c, "Voice/text intake -> local identifier redaction -> fail-closed model gateway -> separate pending-review AI entry.", 48, HEIGHT - 563, WIDTH - 96, size=9, leading=13)
-    draw_text(c, "No external model call runs in this prototype. AI never silently overwrites clinician-authored content.", 48, HEIGHT - 594, WIDTH - 96, size=8, color=MUTED, leading=11)
+    draw_text(c, "Voice/text intake -> measured redaction gate -> strict extraction schema -> local quote/offset verifier -> pending-review entry.", 48, HEIGHT - 563, WIDTH - 96, size=9, leading=13)
+    draw_text(c, "No external model call runs. Generated patient instructions are a separate type and remain blocked until conflict resolution plus clinician approval.", 48, HEIGHT - 594, WIDTH - 96, size=8, color=MUTED, leading=11)
 
     rounded_box(c, 34, HEIGHT - 720, WIDTH - 68, 78, NAVY, stroke=NAVY)
     c.setFillColor(white)
@@ -179,8 +179,13 @@ def page_one(c):
 
 
 def page_two(c):
-    header(c, "Authorization and trust", 2)
-    section_title(c, "Server-enforced", "Roles, revisions and accountable AI", 34, HEIGHT - 78)
+    header(c, "Authorization and evaluation", 2)
+    # Repeat the compact brand lockup after the long running header so the
+    # left label remains explicit in PDF renderers with different font metrics.
+    c.setFillColor(white)
+    c.setFont(BOLD, 11)
+    c.drawString(34, HEIGHT - 29, "NIGHTINGALE / CARE NOTE")
+    section_title(c, "Server-enforced", "Roles, evidence and safe abstention", 34, HEIGHT - 78)
     draw_text(c, "UI visibility is never authorization. Each protected request derives the actor from an HttpOnly session and rechecks role, clinic and section ownership.", 34, HEIGHT - 126, WIDTH - 68, size=9, color=MUTED, leading=13)
 
     c.setFillColor(NAVY)
@@ -221,8 +226,8 @@ def page_two(c):
     c.drawString(34, HEIGHT - 382, "Three distinct accountability records")
     cards = [
         ("REVISION", "Recoverable content snapshot", "full content + version + editor"),
-        ("PROVENANCE", "How an output came to exist", "source entry + version + quote"),
-        ("AUDIT EVENT", "Who acted and with what outcome", "actor + action + versions; no raw note"),
+        ("PROVENANCE", "How an output came to exist", "source + version + exact quote"),
+        ("CONFLICT/AUDIT", "What disagreed; who resolved it", "two sources + outcome; no overwrite"),
     ]
     x = 34
     for index, (title, purpose, fields) in enumerate(cards):
@@ -236,12 +241,12 @@ def page_two(c):
 
     c.setFillColor(NAVY)
     c.setFont(BOLD, 10.5)
-    c.drawString(34, HEIGHT - 524, "Safe edit and revert sequence")
+    c.drawString(34, HEIGHT - 524, "Evaluation contract: meaning -> error test -> action")
     sequence = [
-        ("1", "Client sends content + expectedVersion"),
-        ("2", "Server rechecks role / clinic / section"),
-        ("3", "Atomic update only if version matches"),
-        ("4", "New snapshot + append-only audit metadata"),
+        ("1", "Evidence = verified claims / total claims; broken span -> remove or abstain"),
+        ("2", "Risk score has deterministic floors; allergy never falls below critical"),
+        ("3", "Redaction tests identifier recall and clinical-fact preservation; leak -> fail closed"),
+        ("4", "Patient generation needs sources + no open conflict + clinician approval"),
     ]
     y = HEIGHT - 555
     for number, text_value in sequence:
@@ -258,17 +263,17 @@ def page_two(c):
     rounded_box(c, 34, HEIGHT - 754, WIDTH - 68, 82, CREAM, stroke=CREAM)
     c.setFillColor(CORAL)
     c.setFont(BOLD, 8)
-    c.drawString(48, HEIGHT - 695, "SAFETY BOUNDARY")
-    draw_text(c, "Regex redaction is a prototype control, not certified de-identification. Production requires stronger entity detection, fail-closed review, vendor retention controls and legal/security validation before real patient data.", 48, HEIGHT - 714, WIDTH - 96, size=8.2, leading=12)
+    c.drawString(48, HEIGHT - 695, "LEARNING BOUNDARY")
+    draw_text(c, "Eligible non-critical acceptance adds a bounded +4. Rejection is recorded but does not auto-demote; critical classes ignore learned down-rank. A shadow holdout remains the next exposure-bias gate.", 48, HEIGHT - 714, WIDTH - 96, size=8.2, leading=12)
 
 
 def page_three(c):
     header(c, "Validation and roadmap", 3)
     section_title(c, "Measured and explicit", "Evidence, performance and next steps", 34, HEIGHT - 78)
 
-    metric(c, 34, HEIGHT - 190, 162, "3.44 ms", "warm SSR P50")
-    metric(c, 207, HEIGHT - 190, 162, "6.38 ms", "warm SSR P95", CREAM)
-    metric(c, 380, HEIGHT - 190, 181, "10.58 ms", "warm SSR maximum")
+    metric(c, 34, HEIGHT - 190, 162, "4.76 ms", "warm SSR P50")
+    metric(c, 207, HEIGHT - 190, 162, "11.68 ms", "warm SSR P95", CREAM)
+    metric(c, 380, HEIGHT - 190, 181, "12.50 ms", "warm SSR maximum")
     draw_text(c, "5 warm-ups + 30 measured sequential requests against the built Worker. This is shell time, not an internet or clinical SLA.", 34, HEIGHT - 213, WIDTH - 68, size=7.6, color=MUTED, leading=10)
 
     c.setFillColor(NAVY)
@@ -277,11 +282,12 @@ def page_three(c):
     tests = [
         "Clinic and role scope; patient internal-note boundary",
         "Immutable revisions; revert creates a new version",
-        "Exact highlight source, source version and quoted span",
+        "Exact source/version/span; fabricated anchor is rejected",
         "Stale same-section write returns deterministic conflict",
         "Separate role-owned sections do not overwrite each other",
-        "Clinician feedback changes bounded importance weights",
-        "Identifiers are removed before the model boundary",
+        "Critical floor ignores feedback; rejection is not learned",
+        "Human-human dose conflict blocks patient release",
+        "Identifiers removed while dose/medication facts survive",
     ]
     y = HEIGHT - 282
     for item in tests:
@@ -300,8 +306,8 @@ def page_three(c):
     c.drawString(48, HEIGHT - 507, "BUILT NOW")
     c.setFillColor(CORAL)
     c.drawString(322, HEIGHT - 507, "NEXT VALIDATION GATE")
-    left = ["Glance + exact source jumps", "Server RBAC + comments", "Versions + real revert + conflicts", "Feedback learning + audit", "Pre-model redaction boundary"]
-    right = ["Clinic SSO and membership claims", "Clinician study on synthetic cases", "Consented multilingual ambient capture", "Stronger entity detection + review", "Security/legal review before real data"]
+    left = ["Glance + exact-span evidence", "Risk floor + patient abstention", "Version/edit + clinical conflicts", "Bounded feedback + audit", "Measured pre-model redaction gate"]
+    right = ["Clinic SSO and membership claims", "Shadow holdout + calibrated eval", "Broader terminology conflict rules", "Stronger entity detection + review", "Security/legal review before real data"]
     for index, value in enumerate(left):
         draw_text(c, f"- {value}", 48, HEIGHT - 530 - index * 18, 220, size=7.4, leading=10)
     for index, value in enumerate(right):
@@ -311,12 +317,12 @@ def page_three(c):
     c.setFont(BOLD, 10.5)
     c.drawString(34, HEIGHT - 658, "Evidence used to shape the build")
     sources = [
-        "Singapore MOH - patient-data AI security requirements (4 Aug 2026)",
-        "OWASP A01 - server-side, deny-by-default access control",
+        "Singapore MOH AIHGle 2.0 - human oversight, source checks and drift monitoring",
+        "NIST AI 600-1 + Measure - ground truth, lineage and use-context evaluation",
         "HL7 FHIR R5 - Provenance and AuditEvent separation",
-        "HHS - formal de-identification pathways and residual risk",
-        "NIST AI RMF 1.0 - transparent, monitored AI risk management",
-        "JMIR 2026 - ambient workflow effects and AI-scribe quality risks",
+        "JAMIA selective prediction - defer when error cost exceeds review cost",
+        "OpenAI - Structured Outputs, evaluation guidance and API data controls",
+        "OWASP A01 - server-side, deny-by-default access control",
     ]
     y = HEIGHT - 683
     for source in sources:

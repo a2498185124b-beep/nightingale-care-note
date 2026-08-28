@@ -8,6 +8,13 @@
       "when": 1787669503665,
       "tag": "0000_parched_wendell_vaughn",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1787883193398,
+      "tag": "0001_mixed_warpath",
+      "breakpoints": true
     }
   ]
 }
